@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>云端多人聊天室</title>
+  <!-- 引入 Supabase 官方客户端 SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    .chat-card { width: 100%; max-width: 600px; height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); display: flex; flex-direction: column; overflow: hidden; }
+    .header { background: #2563eb; color: #fff; padding: 16px; font-weight: 600; font-size: 16px; display: flex; justify-content: space-between; }
+    .messages { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+    .msg-item { max-width: 75%; display: flex; flex-direction: column; }
+    .msg-self { align-self: flex-end; }
+    .msg-other { align-self: flex-start; }
+    .meta { font-size: 12px; color: #888; margin-bottom: 2px; }
+    .bubble { padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-break: break-all; }
+    .msg-self .bubble { background: #2563eb; color: #fff; border-bottom-right-radius: 2px; }
+    .msg-other .bubble { background: #e5e7eb; color: #111; border-bottom-left-radius: 2px; }
+    .footer { display: flex; padding: 12px; background: #fafafa; border-top: 1px solid #e5e7eb; gap: 8px; }
+    input[type="text"] { flex: 1; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; outline: none; }
+    input[type="text"]:focus { border-color: #2563eb; }
+    button { padding: 10px 18px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
+    button:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+
+<div class="chat-card">
+  <div class="header">
+    <span>公共多人聊天室</span>
+    <span id="status" style="font-size: 12px; opacity: 0.8;">正在连接...</span>
+  </div>
+  <div class="messages" id="messageBox"></div>
+  <form class="footer" id="chatForm">
+    <input type="text" id="msgInput" placeholder="输入消息按回车发送..." autocomplete="off" required />
+    <button type="submit">发送</button>
+  </form>
+</div>
+
+<script>
+  // 1. 初始化 Supabase 实例（替换这里的 URL 与 Key）
+  const SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_ANON_PUBLIC_KEY";
+  const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // 2. 本地随机生成或复用用户名
+  let userName = localStorage.getItem("chat_username");
+  if (!userName) {
+    userName = "用户_" + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem("chat_username", userName);
+  }
+
+  const messageBox = document.getElementById("messageBox");
+  const msgInput = document.getElementById("msgInput");
+  const statusEl = document.getElementById("status");
+
+  // 3. 建立房间广播通道
+  const channel = client.channel("public-chat-room", {
+    config: { broadcast: { ack: false } }
+  });
+
+  // 监听来自其他在线客户端的消息
+  channel.on("broadcast", { event: "new_message" }, ({ payload }) => {
+    appendMessage(payload.user, payload.text, false, payload.time);
+  });
+
+  // 订阅连接状态
+  channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      statusEl.textContent = `在线 (${userName})`;
+    } else {
+      statusEl.textContent = "连接断开";
+    }
+  });
+
+  // 4. 发送消息
+  document.getElementById("chatForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = msgInput.value.trim();
+    if (!text) return;
+
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const payload = { user: userName, text, time };
+
+    // 广播给所有人
+    await channel.send({
+      type: "broadcast",
+      event: "new_message",
+      payload
+    });
+
+    // 本地即时渲染
+    appendMessage(userName, text, true, time);
+    msgInput.value = "";
+  });
+
+  function appendMessage(user, text, isSelf, time) {
+    const item = document.createElement("div");
+    item.className = `msg-item ${isSelf ? "msg-self" : "msg-other"}`;
+    item.innerHTML = `
+      <div class="meta">${isSelf ? "我" : user} · ${time}</div>
+      <div class="bubble">${escapeHtml(text)}</div>
+    `;
+    messageBox.appendChild(item);
+    messageBox.scrollTop = messageBox.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+  }
+</script>
+</body>
+</html>
